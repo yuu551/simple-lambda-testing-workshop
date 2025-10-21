@@ -145,7 +145,7 @@ S3は、ファイルがアップロードされた時に以下のようなJSON�
 
 ### load_event() 関数の使い方
 
-`tests/test_file_recorder.py` には、サンプルイベントを読み込むための便利な関数が用意されています：
+`tests/test_file_recorder.py` には、サンプルイベントを読み込むための便利な関数が用意されています。
 
 ```python
 def load_event(name: str) -> dict:
@@ -210,14 +210,14 @@ event["Records"][0]["s3"]["object"]["size"] = 999999
 
 `samples/s3_put_event.json` を使用します。
 
-このイベントは：
+このイベントは
 - bucket: `"my-upload-bucket"`
 - key: `"uploads/report.pdf"`
 - size: `102400`（100KB）
 
 ### 実装すべきテストケース
 
-以下の4つを検証してください：
+以下の4つを検証してください。
 
 #### 1. Lambda関数が正常に実行される
 
@@ -292,51 +292,33 @@ assert "uploaded_at" in item
 
 ### HINTS.md 参照先
 
-詰まったら、以下のヒントを参照してください：
+詰まったら、以下のヒントを参照してください。
 
 - **レベル1**: motoの基本、fixtureの使い方、monkeypatchの使い方
 - **レベル2 ヒント2-1**: DynamoDBテーブルの作成方法
 - **レベル2 ヒント2-2**: S3バケットとオブジェクトの作成方法
 - **レベル2 ヒント2-3**: 環境変数の設定方法
 - **レベル2 ヒント2-4**: boto3クライアントの差し替え方法
-- **レベル2 ヒント2-5**: このテストの実装ステップ詳細
 
 ### つまずきやすいポイント
 
 #### ポイント1: boto3クライアントの差し替え
 
-`file_recorder.py` はモジュールレベルで boto3 クライアントを初期化しています。
+`file_recorder.py` はモジュールレベルで boto3 クライアントを初期化しています。これらを moto のモッククライアントに差し替える必要があります。
 
-```python
-_dynamodb = boto3.resource("dynamodb")
-_s3 = boto3.client("s3")
-```
-
-これらを moto のモッククライアントに差し替える必要があります。
+詳細は **HINTS.md の 2-4** を参照してください。
 
 #### ポイント2: S3オブジェクトの事前配置
 
-Lambda関数内で `_s3.head_object(Bucket=bucket, Key=key)` を呼び出しています。
+Lambda関数内で `_s3.head_object(Bucket=bucket, Key=key)` を呼び出しています。このため、テスト前にS3バケットとオブジェクトを作成しておく必要があります。
 
-このため、テスト前にS3バケットとオブジェクトを作成しておく必要があります。
-
-```python
-s3 = boto3.client("s3", region_name="ap-northeast-1")
-s3.create_bucket(
-    Bucket="my-upload-bucket",
-    CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"}
-)
-s3.put_object(
-    Bucket="my-upload-bucket",
-    Key="uploads/report.pdf",
-    Body=b"test content",
-    ContentType="application/pdf"
-)
-```
+詳細は **HINTS.md の 2-2** を参照してください。
 
 #### ポイント3: 環境変数の設定
 
 `FILES_TABLE` 環境変数が必須です。設定しないとエラーになります。
+
+詳細は **HINTS.md の 2-3** を参照してください。
 
 ---
 
@@ -372,7 +354,7 @@ s3.put_object(
 
 ### 実装すべきテストケース
 
-以下の3つを検証してください：
+以下の3つを検証してください。
 
 #### 1. 既存レコードをDynamoDBに投入
 
@@ -426,21 +408,7 @@ assert stored["uploaded_at"] == "2025-03-01T09:00:00.000Z"  # 更新されてい
 5. DynamoDBを確認
    - レコードが変更されていない
 ```
-
-### 実装チェックリスト
-
-- [ ] fixture でDynamoDBテーブルと環境変数を設定した
-- [ ] テスト開始前に既存レコードを `put_item()` で投入した
-- [ ] `load_event("s3_put_event.json")` でイベントを読み込んだ
-- [ ] `lambda_handler()` を実行した
-- [ ] レスポンスで `message == "File already recorded"` を確認した
-- [ ] DynamoDBから `get_item()` でレコードを再取得した
 - [ ] `uploaded_at` が変更されていないことを確認した
-
-### HINTS.md 参照先
-
-- **レベル2 ヒント2-6**: このテストの実装ステップ詳細
-- **DESIGN.md**: 重複チェックの仕組み（「重複チェックの仕組み」セクション）
 
 ### つまずきやすいポイント
 

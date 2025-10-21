@@ -66,7 +66,7 @@ pytest --version
 pytest tests/ -v
 ```
 
-以下のような出力が表示されればOKです：
+以下のような出力が表示されればOKです。
 
 ```
 tests/test_file_recorder.py::test_records_new_file SKIPPED
@@ -99,7 +99,7 @@ tests/test_file_recorder.py::test_skips_duplicate_file SKIPPED
 
 ## 次のステップ
 
-このワークショップを完了したら、以下に挑戦してください：
+このワークショップを完了したら、以下に挑戦してください。
 
 ### 1. 追加課題に挑戦
 より複雑な EventBridge + SNS 構成のワークショップに挑戦します。

@@ -129,6 +129,55 @@ def test_with_mock_client(monkeypatch):
 
 ### 2-1. DynamoDBテーブルの作成方法
 
+#### DynamoDBとは？
+
+DynamoDBは、AWSが提供するNoSQLデータベースです。
+
+**従来のリレーショナルDB（MySQL、PostgreSQLなど）との違い:**
+- テーブル間の結合（JOIN）がない
+- スキーマが柔軟（自由に属性を追加できる）
+- 高速で自動スケールする
+
+**基本概念:**
+- **テーブル**: データの保存場所（MySQLのテーブルと似ている）
+- **Item**: 1件のレコード（MySQLの行と似ている）
+- **Attribute**: 項目（MySQLの列と似ている）
+- **Primary Key**: データを一意に識別するキー（必須）
+
+#### 今回のワークショップで作るテーブル
+
+このワークショップでは、**S3にアップロードされたファイルのメタデータを記録するテーブル**を作成します。
+
+**テーブル名:** `files_table`
+
+**保存するデータの例:**
+```python
+{
+    "file_id": "my-upload-bucket#uploads/report.pdf",  # プライマリキー
+    "bucket": "my-upload-bucket",                      # S3バケット名
+    "key": "uploads/report.pdf",                       # S3オブジェクトキー
+    "size": 102400,                                     # ファイルサイズ（バイト）
+    "content_type": "application/pdf",                 # MIMEタイプ
+    "uploaded_at": "2025-03-01T10:30:00.000Z"          # アップロード日時
+}
+```
+
+**file_id の設計:**
+- 形式: `{bucket}#{key}`（例: `my-upload-bucket#uploads/report.pdf`）
+- なぜこの形式？
+  - 同じファイル名でも、バケットが違えば別のファイル
+  - バケット名とキーを組み合わせて一意なIDを作る
+  - `#` で区切ることで、後から分解できる
+
+**重複チェックの仕組み:**
+1. Lambda関数がS3イベントを受信
+2. `file_id` を生成（例: `my-upload-bucket#uploads/report.pdf`）
+3. DynamoDBで `get_item` を実行
+4. 既にレコードが存在する → 処理をスキップ
+5. レコードが存在しない → 新規作成
+
+#### テーブル作成のコード
+
 **最小構成のテーブル作成:**
 
 ```python
@@ -153,17 +202,70 @@ with mock_aws():
     return table
 ```
 
-**ポイント:**
-- `KeySchema`: プライマリキーの定義
-  - `HASH`: パーティションキー（必須）
-  - `RANGE`: ソートキー（オプション）
-- `AttributeDefinitions`: キーで使う属性の型定義
-  - `S`: String（文字列）
-  - `N`: Number（数値）
-  - `B`: Binary（バイナリ）
-- `BillingMode`: 課金モード
-  - `PAY_PER_REQUEST`: オンデマンド（テストではこれを推奨）
-  - `PROVISIONED`: プロビジョンド（キャパシティ指定が必要）
+#### パラメータの詳細
+
+**KeySchema: プライマリキーの定義**
+- `HASH`: パーティションキー（必須）
+  - データを一意に識別するキー
+  - 今回は `file_id` を使用
+- `RANGE`: ソートキー（オプション）
+  - 同じパーティションキー内でデータを並べるキー
+  - 今回は使用しない
+
+**AttributeDefinitions: キーで使う属性の型定義**
+- `S`: String（文字列）
+- `N`: Number（数値）
+- `B`: Binary（バイナリ）
+- **重要:** プライマリキーで使う属性のみ定義する
+  - `bucket`, `key`, `size` などは定義不要（自由に追加できる）
+
+**BillingMode: 課金モード**
+- `PAY_PER_REQUEST`: オンデマンド課金
+  - 使った分だけ課金
+  - テストではこれを推奨（シンプル）
+- `PROVISIONED`: プロビジョンド課金
+  - 事前にキャパシティを指定
+  - 本番環境で使うことが多い
+
+#### テストでの注意点
+
+**moto では実際のAWSに接続しない:**
+- テーブルはメモリ上に作られる
+- `with mock_aws():` のブロックを抜けると消える
+- 課金は一切発生しない
+
+**テーブル名は環境変数と一致させる:**
+```python
+# テーブル作成
+table = dynamodb.create_table(TableName="files_table", ...)
+
+# 環境変数設定
+monkeypatch.setenv("FILES_TABLE", "files_table")
+```
+
+**実装例（fixtureで使う場合）:**
+```python
+@pytest.fixture
+def mock_aws_services(monkeypatch):
+    with mock_aws():
+        dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
+        
+        # テーブル作成
+        table = dynamodb.create_table(
+            TableName="files_table",
+            KeySchema=[{"AttributeName": "file_id", "KeyType": "HASH"}],
+            AttributeDefinitions=[{"AttributeName": "file_id", "AttributeType": "S"}],
+            BillingMode="PAY_PER_REQUEST"
+        )
+        
+        # 環境変数設定
+        monkeypatch.setenv("FILES_TABLE", "files_table")
+        
+        # boto3クライアントを差し替え
+        monkeypatch.setattr(file_recorder, "_dynamodb", dynamodb)
+        
+        yield {"table": table, "dynamodb": dynamodb}
+```
 
 ---
 
@@ -225,16 +327,18 @@ def test_example(monkeypatch):
 
 ### 2-4. boto3クライアントの差し替え方法
 
-`file_recorder.py` はモジュールレベルでboto3クライアントを初期化しています：
+#### なぜ差し替えが必要？
+
+`file_recorder.py` はモジュールレベルでboto3クライアントを初期化しています。
 
 ```python
 _dynamodb = boto3.resource("dynamodb")
 _s3 = boto3.client("s3")
 ```
 
-これらをmotoのモッククライアントに差し替える必要があります。
+このままだとテスト実行時に**実際のAWS**に接続しようとします。motoのモックを使うには、これらを差し替える必要があります。
 
-**差し替え方法:**
+#### 差し替え方法
 
 ```python
 import file_recorder
@@ -253,127 +357,60 @@ with mock_aws():
     # これ以降、file_recorder._dynamodb と file_recorder._s3 はモックになる
 ```
 
----
+#### 差し替え後の動作
 
-### 2-5. 課題1の実装ステップ（test_records_new_file）
+差し替えたクライアントは、Lambda関数内部で自動的に使われます。
 
-**ステップ1: fixtureを作成**
+**Lambda関数内部（file_recorder.py）:**
+```python
+def lambda_handler(event, context):
+    # 環境変数からテーブル名を取得
+    table_name = os.environ.get("FILES_TABLE")
+    
+    # ここで差し替えた _dynamodb が使われる
+    table = _dynamodb.Table(table_name)  # ← motoのモックテーブル
+    
+    # get_itemもモックで動作
+    existing = table.get_item(Key={"file_id": file_id})  # ← メモリ上のデータにアクセス
+    
+    # S3もモックで動作
+    metadata = _s3.head_object(Bucket=bucket, Key=key)  # ← motoのモックS3
+```
+
+#### テスト内での検証方法
+
+fixtureで差し替えたクライアントとテスト内で使うクライアントは**同じインスタンス**です。
 
 ```python
-import pytest
-import boto3
-from moto import mock_aws
-import file_recorder
-
 @pytest.fixture
 def mock_aws_services(monkeypatch):
-    """AWSサービスのモックをセットアップ"""
     with mock_aws():
-        # DynamoDBテーブルを作成
+        # モッククライアントを作成
         dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
-        table = dynamodb.create_table(
-            TableName="files_table",
-            KeySchema=[{"AttributeName": "file_id", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "file_id", "AttributeType": "S"}],
-            BillingMode="PAY_PER_REQUEST"
-        )
-
-        # S3バケットを作成
-        s3 = boto3.client("s3", region_name="ap-northeast-1")
-        s3.create_bucket(
-            Bucket="my-upload-bucket",
-            CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"}
-        )
-
-        # S3にオブジェクトを配置
-        s3.put_object(
-            Bucket="my-upload-bucket",
-            Key="uploads/report.pdf",
-            Body=b"test content",
-            ContentType="application/pdf"
-        )
-
-        # 環境変数を設定
-        monkeypatch.setenv("FILES_TABLE", "files_table")
-
-        # boto3クライアントを差し替え
+        table = dynamodb.create_table(...)
+        
+        # 差し替え
         monkeypatch.setattr(file_recorder, "_dynamodb", dynamodb)
-        monkeypatch.setattr(file_recorder, "_s3", s3)
+        
+        # テストに渡す
+        yield {"table": table, "dynamodb": dynamodb}
 
-        # テストに渡すデータ
-        yield {
-            "table": table,
-            "dynamodb": dynamodb,
-            "s3": s3
-        }
-```
-
-**ステップ2: テスト関数を実装**
-
-```python
-def test_records_new_file(mock_aws_services):
-    """新規ファイルのアップロードイベントでレコードが作成される"""
-    # イベントを読み込む
-    event = load_event("s3_put_event.json")
-
+def test_example(mock_aws_services):
     # Lambda関数を実行
     response = file_recorder.lambda_handler(event, context=None)
-
-    # レスポンスを検証
-    assert response["statusCode"] == 200
-
-    body = json.loads(response["body"])
-    assert body["message"] == "File recorded successfully"
-
-    # DynamoDBを検証
+    
+    # 同じテーブルインスタンスで検証できる
     table = mock_aws_services["table"]
     stored = table.get_item(Key={"file_id": "my-upload-bucket#uploads/report.pdf"})
-
+    
+    # Lambda関数が書き込んだデータを取得できる
     assert "Item" in stored
-    item = stored["Item"]
-    assert item["file_id"] == "my-upload-bucket#uploads/report.pdf"
-    assert item["bucket"] == "my-upload-bucket"
-    assert item["key"] == "uploads/report.pdf"
-    assert item["size"] == 102400
 ```
 
----
-
-### 2-6. 課題2の実装ステップ（test_skips_duplicate_file）
-
-**ステップ1: 既存レコードを投入**
-
-```python
-def test_skips_duplicate_file(mock_aws_services):
-    """重複ファイルのイベントで処理がスキップされる"""
-    table = mock_aws_services["table"]
-
-    # 既存レコードを投入
-    table.put_item(Item={
-        "file_id": "my-upload-bucket#uploads/report.pdf",
-        "bucket": "my-upload-bucket",
-        "key": "uploads/report.pdf",
-        "size": 102400,
-        "content_type": "application/pdf",
-        "uploaded_at": "2025-03-01T09:00:00.000Z"
-    })
-
-    # イベントを読み込む
-    event = load_event("s3_put_event.json")
-
-    # Lambda関数を実行
-    response = file_recorder.lambda_handler(event, context=None)
-
-    # レスポンスを検証
-    assert response["statusCode"] == 200
-
-    body = json.loads(response["body"])
-    assert body["message"] == "File already recorded"
-
-    # DynamoDBを検証（変更されていないことを確認）
-    stored = table.get_item(Key={"file_id": "my-upload-bucket#uploads/report.pdf"})["Item"]
-    assert stored["uploaded_at"] == "2025-03-01T09:00:00.000Z"  # 元の値のまま
-```
+**ポイント:**
+- fixtureで差し替えたクライアント = Lambda関数内で使われるクライアント
+- 同じメモリ上のデータにアクセスしている
+- だからテスト内でLambda関数の実行結果を検証できる
 
 ---
 
