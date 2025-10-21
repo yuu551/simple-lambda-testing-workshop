@@ -512,7 +512,7 @@ def test_invalid_event_structure():
 def test_records_new_file(mock_aws_services):
     event = load_event("s3_put_event.json")
     print(f"Event: {json.dumps(event, indent=2)}")  # イベント内容を確認
-    
+
     response = file_recorder.lambda_handler(event, context=None)
     print(f"Response: {json.dumps(response, indent=2)}")  # レスポンスを確認
 ```
@@ -534,24 +534,3 @@ pytest tests/test_file_recorder.py::test_records_new_file -v -s
 これでprint文の出力が表示されます。
 
 ---
-
-## 次のステップ
-
-この演習を完了したら：
-
-1. **legacy-lambda-testing-workshop に挑戦**
-   - より複雑なEventBridge + DynamoDB + SNS構成
-   - バージョン管理、履歴管理
-   - SNS通知のテスト
-
-2. **カバレッジを測定**
-   ```bash
-   pytest tests/ --cov=src --cov-report=html
-   open htmlcov/index.html
-   ```
-
-3. **CI/CDに統合**
-   - GitHub Actions でテストを自動実行
-   - プルリクエスト時にテストを実行
-
-おつかれさまでした！🎉

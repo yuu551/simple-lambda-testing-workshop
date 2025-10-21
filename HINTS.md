@@ -31,7 +31,7 @@ import boto3
 with mock_aws():
     # この中では boto3 が偽物のAWSに接続される
     dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
-    
+
     # テーブルを作成（メモリ上に作られる）
     table = dynamodb.create_table(
         TableName="test_table",
@@ -39,10 +39,10 @@ with mock_aws():
         AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
         BillingMode="PAY_PER_REQUEST"
     )
-    
+
     # データを保存（メモリ上に保存される）
     table.put_item(Item={"id": "123", "name": "test"})
-    
+
     # データを取得
     response = table.get_item(Key={"id": "123"})
     print(response["Item"])  # => {"id": "123", "name": "test"}
@@ -107,7 +107,7 @@ def database():
 ```python
 def test_with_env(monkeypatch):
     monkeypatch.setenv("MY_VAR", "test_value")
-    
+
     import os
     assert os.environ["MY_VAR"] == "test_value"
 ```
@@ -119,7 +119,7 @@ import my_module
 def test_with_mock_client(monkeypatch):
     fake_client = FakeClient()
     monkeypatch.setattr(my_module, "_client", fake_client)
-    
+
     # これ以降、my_module._client は fake_client になる
 ```
 
@@ -137,7 +137,7 @@ from moto import mock_aws
 
 with mock_aws():
     dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
-    
+
     table = dynamodb.create_table(
         TableName="files_table",
         KeySchema=[
@@ -148,7 +148,7 @@ with mock_aws():
         ],
         BillingMode="PAY_PER_REQUEST"  # オンデマンド課金
     )
-    
+
     # テーブルを返す
     return table
 ```
@@ -177,13 +177,13 @@ from moto import mock_aws
 
 with mock_aws():
     s3 = boto3.client("s3", region_name="ap-northeast-1")
-    
+
     # バケット作成（ap-northeast-1 リージョン）
     s3.create_bucket(
         Bucket="my-upload-bucket",
         CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"}
     )
-    
+
     # オブジェクト配置
     s3.put_object(
         Bucket="my-upload-bucket",
@@ -207,7 +207,7 @@ with mock_aws():
 ```python
 def test_example(monkeypatch):
     monkeypatch.setenv("FILES_TABLE", "files_table")
-    
+
     # 以降、os.environ["FILES_TABLE"] は "files_table" になる
     import os
     assert os.environ["FILES_TABLE"] == "files_table"
@@ -245,11 +245,11 @@ with mock_aws():
     # モッククライアントを作成
     mock_dynamodb = boto3.resource("dynamodb", region_name="ap-northeast-1")
     mock_s3 = boto3.client("s3", region_name="ap-northeast-1")
-    
+
     # file_recorder モジュールのグローバル変数を差し替え
     monkeypatch.setattr(file_recorder, "_dynamodb", mock_dynamodb)
     monkeypatch.setattr(file_recorder, "_s3", mock_s3)
-    
+
     # これ以降、file_recorder._dynamodb と file_recorder._s3 はモックになる
 ```
 
@@ -277,14 +277,14 @@ def mock_aws_services(monkeypatch):
             AttributeDefinitions=[{"AttributeName": "file_id", "AttributeType": "S"}],
             BillingMode="PAY_PER_REQUEST"
         )
-        
+
         # S3バケットを作成
         s3 = boto3.client("s3", region_name="ap-northeast-1")
         s3.create_bucket(
             Bucket="my-upload-bucket",
             CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"}
         )
-        
+
         # S3にオブジェクトを配置
         s3.put_object(
             Bucket="my-upload-bucket",
@@ -292,14 +292,14 @@ def mock_aws_services(monkeypatch):
             Body=b"test content",
             ContentType="application/pdf"
         )
-        
+
         # 環境変数を設定
         monkeypatch.setenv("FILES_TABLE", "files_table")
-        
+
         # boto3クライアントを差し替え
         monkeypatch.setattr(file_recorder, "_dynamodb", dynamodb)
         monkeypatch.setattr(file_recorder, "_s3", s3)
-        
+
         # テストに渡すデータ
         yield {
             "table": table,
@@ -315,20 +315,20 @@ def test_records_new_file(mock_aws_services):
     """新規ファイルのアップロードイベントでレコードが作成される"""
     # イベントを読み込む
     event = load_event("s3_put_event.json")
-    
+
     # Lambda関数を実行
     response = file_recorder.lambda_handler(event, context=None)
-    
+
     # レスポンスを検証
     assert response["statusCode"] == 200
-    
+
     body = json.loads(response["body"])
     assert body["message"] == "File recorded successfully"
-    
+
     # DynamoDBを検証
     table = mock_aws_services["table"]
     stored = table.get_item(Key={"file_id": "my-upload-bucket#uploads/report.pdf"})
-    
+
     assert "Item" in stored
     item = stored["Item"]
     assert item["file_id"] == "my-upload-bucket#uploads/report.pdf"
@@ -347,7 +347,7 @@ def test_records_new_file(mock_aws_services):
 def test_skips_duplicate_file(mock_aws_services):
     """重複ファイルのイベントで処理がスキップされる"""
     table = mock_aws_services["table"]
-    
+
     # 既存レコードを投入
     table.put_item(Item={
         "file_id": "my-upload-bucket#uploads/report.pdf",
@@ -357,19 +357,19 @@ def test_skips_duplicate_file(mock_aws_services):
         "content_type": "application/pdf",
         "uploaded_at": "2025-03-01T09:00:00.000Z"
     })
-    
+
     # イベントを読み込む
     event = load_event("s3_put_event.json")
-    
+
     # Lambda関数を実行
     response = file_recorder.lambda_handler(event, context=None)
-    
+
     # レスポンスを検証
     assert response["statusCode"] == 200
-    
+
     body = json.loads(response["body"])
     assert body["message"] == "File already recorded"
-    
+
     # DynamoDBを検証（変更されていないことを確認）
     stored = table.get_item(Key={"file_id": "my-upload-bucket#uploads/report.pdf"})["Item"]
     assert stored["uploaded_at"] == "2025-03-01T09:00:00.000Z"  # 元の値のまま
@@ -465,11 +465,11 @@ print([t.name for t in tables])  # => ["files_table"]
 ```python
 def test_example(mock_aws_services):
     table = mock_aws_services["table"]
-    
+
     # 全レコードをスキャン
     response = table.scan()
     items = response["Items"]
-    
+
     print(f"Total items: {len(items)}")
     for item in items:
         print(json.dumps(item, indent=2, default=str))
@@ -480,10 +480,10 @@ def test_example(mock_aws_services):
 ```python
 def test_example(mock_aws_services):
     s3 = mock_aws_services["s3"]
-    
+
     # オブジェクト一覧を取得
     response = s3.list_objects_v2(Bucket="my-upload-bucket")
-    
+
     if "Contents" in response:
         for obj in response["Contents"]:
             print(f"Key: {obj['Key']}, Size: {obj['Size']}")
@@ -496,13 +496,13 @@ def test_example(mock_aws_services):
 ```python
 def test_example(mock_aws_services):
     s3 = mock_aws_services["s3"]
-    
+
     # メタデータを取得
     response = s3.head_object(
         Bucket="my-upload-bucket",
         Key="uploads/report.pdf"
     )
-    
+
     print(f"ContentType: {response.get('ContentType')}")
     print(f"ContentLength: {response.get('ContentLength')}")
 ```
@@ -552,5 +552,3 @@ pytest tests/ --tb=long
 - boto3クライアントを `monkeypatch.setattr()` で差し替える
 - S3オブジェクトを事前に配置する（`put_object`）
 - 環境変数を設定する（`monkeypatch.setenv`）
-
-頑張ってください！🎉

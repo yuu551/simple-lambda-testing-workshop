@@ -65,12 +65,12 @@ graph LR
     S3[S3バケット<br/>ファイルストレージ]
     Lambda[Lambda関数<br/>file_recorder.py]
     DDB[(DynamoDB<br/>files_table)]
-    
+
     User -->|ファイルをアップロード| S3
     S3 -->|イベント通知| Lambda
     Lambda -->|メタデータ記録| DDB
     Lambda -->|メタデータ取得<br/>head_object| S3
-    
+
     style Lambda fill:#ff9900
     style DDB fill:#4053d6
     style S3 fill:#569a31
@@ -91,20 +91,20 @@ flowchart TD
     Start([S3から<br/>Putイベント受信]) --> Validate[イベント内容を検証<br/>bucket, key, sizeなど]
     Validate -->|不正| Error1[ValueErrorを投げる]
     Validate -->|正常| CheckEnv[環境変数を確認<br/>FILES_TABLE]
-    
+
     CheckEnv -->|未設定| Error2[RuntimeErrorを投げる]
     CheckEnv -->|設定済み| CheckDup{DynamoDBで<br/>重複チェック}
-    
+
     CheckDup -->|既存レコードあり| Skip[処理をスキップ<br/>Already recorded]
     CheckDup -->|新規ファイル| GetMeta[S3から<br/>head_objectで<br/>メタデータ取得]
-    
+
     GetMeta --> SaveDB[DynamoDBに保存<br/>file_id, bucket, key,<br/>size, content_type]
-    
+
     SaveDB --> Return[成功レスポンス<br/>statusCode: 200]
     Skip --> Return
     Error1 --> End[エラー終了]
     Error2 --> End
-    
+
     style Start fill:#90EE90
     style Return fill:#87CEEB
     style Skip fill:#FFD700
@@ -233,17 +233,17 @@ S3イベントは、以下の理由で重複して送信される可能性があ
 ```mermaid
 flowchart TD
     Start([イベント受信<br/>bucket: my-bucket<br/>key: file.txt]) --> BuildID[file_id を生成<br/>my-bucket#file.txt]
-    
+
     BuildID --> CheckDB[DynamoDBで<br/>get_itemを実行]
-    
+
     CheckDB --> Exists{レコードは<br/>存在する？}
     Exists -->|はい| Skip[⚠️ 重複<br/>処理をスキップ<br/>Already recorded]
     Exists -->|いいえ| Process[✅ 新規ファイル<br/>処理を実行]
-    
+
     Process --> Save[DynamoDBに保存]
     Save --> Success[成功]
     Skip --> Success
-    
+
     style Process fill:#90EE90
     style Skip fill:#FFD700
     style Save fill:#87CEEB
@@ -310,23 +310,23 @@ FILES_TABLE=files_table
 ## エッジケースと既知のリスク
 
 ### 1. 重複イベント処理（最重要）
-**問題:** 同じS3イベントが2回送信される可能性がある  
-**対策:** `file_id` で重複チェックを実施  
+**問題:** 同じS3イベントが2回送信される可能性がある
+**対策:** `file_id` で重複チェックを実施
 **確認事項:** `get_item` で既存レコードを確認してから `put_item` を実行
 
 ### 2. 環境変数未設定
-**問題:** `FILES_TABLE` が設定されていない  
-**対策:** `RuntimeError` を投げる  
+**問題:** `FILES_TABLE` が設定されていない
+**対策:** `RuntimeError` を投げる
 **影響:** Lambda関数が起動時にエラーで停止
 
 ### 3. S3 head_object の失敗
-**問題:** ファイルが削除済み、または権限不足  
-**対策:** 例外をキャッチしてログ出力  
+**問題:** ファイルが削除済み、または権限不足
+**対策:** 例外をキャッチしてログ出力
 **影響:** メタデータが取得できないが、基本情報（bucket, key, size）は記録
 
 ### 4. DynamoDB書き込み失敗
-**問題:** テーブルが存在しない、または権限不足  
-**対策:** 例外をキャッチして再スロー  
+**問題:** テーブルが存在しない、または権限不足
+**対策:** 例外をキャッチして再スロー
 **影響:** Lambda関数がエラー終了し、リトライされる
 
 ---
@@ -360,7 +360,7 @@ FILES_TABLE=files_table
 
 ### 1. boto3クライアントの初期化位置
 
-**問題:**  
+**問題:**
 boto3クライアント（DynamoDB、S3）を関数の外で初期化している
 
 ```python
@@ -372,7 +372,7 @@ def lambda_handler(event, context):
     # ... 処理 ...
 ```
 
-**影響:**  
+**影響:**
 - ユニットテストで `moto` を使ったパッチが必要
 - テストコードが複雑になる
 
@@ -386,10 +386,10 @@ def lambda_handler(event, context):
 
 ### 2. エラーハンドリングの不足
 
-**問題:**  
+**問題:**
 S3 の `head_object` が失敗した場合の処理が不十分
 
-**影響:**  
+**影響:**
 - ファイルが削除済みの場合にエラーで停止
 - Content-Type が取得できない
 
@@ -404,10 +404,10 @@ except ClientError:
 
 ### 3. ログの充実化
 
-**問題:**  
+**問題:**
 処理内容がログに記録されていない
 
-**影響:**  
+**影響:**
 - トラブルシューティングが困難
 - 本番環境での問題特定に時間がかかる
 
@@ -419,11 +419,3 @@ logger.info("Processing S3 event", extra={
     "size": size
 })
 ```
-
----
-
-## 参考資料
-
-- [S3イベント通知の公式ドキュメント](https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-content-structure.html)
-- [DynamoDB GetItem API](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_GetItem.html)
-- [DynamoDB PutItem API](https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html)
