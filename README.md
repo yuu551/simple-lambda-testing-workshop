@@ -95,6 +95,14 @@ tests/test_file_recorder.py::test_skips_duplicate_file SKIPPED
 ### Phase 4: 動作確認と振り返り
 1. `pytest tests/ -v` でテストを実行
 2. カバレッジを測定（オプション）
+   ```bash
+   # HTMLレポート生成（推奨）
+   pytest --cov=src --cov-report=html
+   # ブラウザで htmlcov/index.html を開いて確認
+   
+   # ターミナルで確認（簡易）
+   pytest --cov=src --cov-report=term-missing
+   ```
 3. 学んだことを共有
 
 ## 次のステップ

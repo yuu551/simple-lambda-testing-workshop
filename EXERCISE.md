@@ -496,7 +496,7 @@ print(f"Stored: {json.dumps(stored, indent=2, default=str)}")
 **pytest の -s オプションを使う:**
 
 ```bash
-pytest tests/test_file_recorder.py::test_records_new_file -v -s
+pytest  -v -s
 ```
 
 これでprint文の出力が表示されます。
